@@ -37,6 +37,7 @@ class Station:
 
 @dataclass
 class Route:
+    # last_checked: dt.datetime # TODO: nekontroluj routu kazdou minutu
     train: Train
     carrier: str
     stations: list[Station]
