@@ -41,7 +41,7 @@ URL_ROUTEINFO = "https://grapp.spravazeleznic.cz/OneTrain/RouteInfo/{APP_ID}?tra
 SQLITE_TRAINS = """
 CREATE TABLE vlaky (
     datum DATE NOT NULL,
-    id INT PRIMARY_KEY,
+    id INT PRIMARY_KEY UNIQUE NOT NULL,
     nazev TEXT NOT NULL,
     provozovatel TEXT NOT NULL,
     stanice_vychozi TEXT NOT NULL,
@@ -54,7 +54,7 @@ CREATE TABLE vlaky (
 """
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, order=True)
 class Train:
     id: int
     name: str
@@ -156,8 +156,10 @@ def main(token: str):
         conn.execute(SQLITE_TRAINS)
 
     all_routes = dict()
-    cur = conn.execute("SELECT id, nazev, ocekavany_prijezd FROM vlaky").fetchall()
-    for tid, name, arrival in cur:
+    cur = conn.execute(
+        "SELECT id, nazev, ocekavany_prijezd, dojel FROM vlaky"
+    ).fetchall()
+    for tid, name, arrival, arrived in cur:
         train = Train(id=tid, name=name)
         all_routes[train] = Route(
             train=train,
@@ -165,7 +167,7 @@ def main(token: str):
             stations=None,
             planned_arrival=dt.time.fromisoformat(arrival),
             expected_journey_minutes=None,
-            arrived=None,
+            arrived=arrived,
         )
 
     logging.info("Načteno %d vlaků z disku", len(cur))
@@ -189,6 +191,10 @@ def main(token: str):
         random.shuffle(randomised)
         for train in randomised:
             if all_routes.get(train):
+                if all_routes[train].arrived:
+                    del all_routes[train]
+                    continue
+
                 # logging.info("tenhle vlak (%s) jsme uz videli", train)
                 arrival = dt.datetime.combine(
                     dt.date.today(), all_routes[train].planned_arrival
@@ -234,7 +240,11 @@ def main(token: str):
                 if train in all_routes:
                     del all_routes[train]
             conn.execute(
-                "INSERT INTO vlaky VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                """INSERT INTO vlaky VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT DO UPDATE SET
+                    zpozdeni=excluded.zpozdeni,
+                    dojel=excluded.dojel
+                """,
                 (
                     dt.date.today(),
                     train.id,
