@@ -91,7 +91,10 @@ def parse_route_from_html(ht, train) -> Optional[Route]:
         return None
     carrier = ht.find(".//a[@class='carrierRestrictionLink']").text.strip()
     # nekdy je to odkaz, nekdy span
-    current_station = ht.find(".//*[@id='currentStation']").text_content().strip()
+    current_station_el = ht.find(".//*[@id='currentStation']")
+    if current_station_el is None:
+        return None  # vlastne nevim, kdy to nastane
+    current_station = current_station_el.text_content().strip()
 
     rows = ht.find(".//div[@class='route']").findall("div[@class='row']")
     stations = []
