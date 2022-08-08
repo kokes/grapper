@@ -22,6 +22,7 @@ SELECT
 	round(sum(case when zpozdeni <= 15 then 1 else 0 end)/cast(count(*) as float), 2) pod_15min
 FROM
 	vlaky
+WHERE dojel is TRUE
 GROUP BY
 	1
 ORDER BY 2 desc
