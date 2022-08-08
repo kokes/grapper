@@ -41,13 +41,15 @@ URL_ROUTEINFO = "https://grapp.spravazeleznic.cz/OneTrain/RouteInfo/{APP_ID}?tra
 SQLITE_TRAINS = """
 CREATE TABLE vlaky (
     datum DATE NOT NULL,
-    id INT NOT NULL, -- TODO: unique? pk?
+    id INT PRIMARY_KEY,
     nazev TEXT NOT NULL,
     provozovatel TEXT NOT NULL,
     stanice_vychozi TEXT NOT NULL,
     stanice_cilova TEXT NOT NULL,
-    delka_cesty FLOAT NOT NULL,
-    zpozdeni FLOAT NOT NULL
+    ocekavany_prijezd TIME NOT NULL,
+    delka_cesty_minut FLOAT NOT NULL,
+    zpozdeni FLOAT,
+    dojel BOOL NOT NULL
 )
 """
 
@@ -72,6 +74,7 @@ class Route:
     train: Train
     carrier: str
     stations: list[Station]
+    planned_arrival: time
     expected_journey_minutes: float
     arrived: bool
 
@@ -128,6 +131,7 @@ def parse_route_from_html(ht, train) -> Optional[Route]:
         train=train,
         carrier=carrier,
         stations=stations,
+        planned_arrival=stations[-1].planned_arrival,
         expected_journey_minutes=delay_minutes(
             stations[0].planned_departure, stations[-1].planned_arrival
         ),
@@ -151,25 +155,27 @@ def main(token: str):
     if not dbexists:
         conn.execute(SQLITE_TRAINS)
 
-    arrived = set()
-    cur = conn.execute("SELECT id, nazev FROM vlaky").fetchall()
-    for tid, name in cur:
-        arrived.add(Train(id=tid, name=name))
-    logging.info("Načteno %d dorazivších vlaků", len(cur))
-
     all_routes = dict()
+    cur = conn.execute("SELECT id, nazev, ocekavany_prijezd FROM vlaky").fetchall()
+    for tid, name, arrival in cur:
+        train = Train(id=tid, name=name)
+        all_routes[train] = Route(
+            train=train,
+            carrier=None,
+            stations=None,
+            planned_arrival=dt.time.fromisoformat(arrival),
+            expected_journey_minutes=None,
+            arrived=None,
+        )
+
+    logging.info("Načteno %d vlaků z disku", len(cur))
+
     while True:
         trains = get_all_trains(token)
-        assert (
-            len(trains) > 0
-        )  # TODO: refreshuj token (ten ale muze expirovat i u tech vlaku samotnych)
-        logging.info(
-            "načteno %d vlaků (%d po odečtení již zapsaných)",
-            len(trains),
-            len(trains - arrived),
-        )
-        new_trains = trains - set(all_routes.keys()) - arrived
-        removed_trains = set(all_routes.keys()) - trains - arrived
+        assert len(trains) > 0
+        logging.info("načteno %d vlaků z API", len(trains))
+        new_trains = trains - set(all_routes.keys())
+        removed_trains = set(all_routes.keys()) - trains
         if all_routes and new_trains:
             logging.info("%d nových vlaků", len(new_trains))
         if all_routes and removed_trains:
@@ -185,7 +191,7 @@ def main(token: str):
             if all_routes.get(train):
                 # logging.info("tenhle vlak (%s) jsme uz videli", train)
                 arrival = dt.datetime.combine(
-                    dt.date.today(), all_routes[train].stations[-1].planned_arrival
+                    dt.date.today(), all_routes[train].planned_arrival
                 )
                 # logging.info("ocekavame ho v %s", arrival)
                 if dt.datetime.now() < arrival - dt.timedelta(minutes=15):
@@ -209,8 +215,9 @@ def main(token: str):
                 if train in all_routes:
                     del all_routes[train]
                 continue
+
+            delay = None
             if route.arrived:
-                arrived.add(train)
                 delay = delay_minutes(
                     route.stations[-1].planned_arrival,
                     route.stations[-1].actual_arrival,
@@ -224,22 +231,25 @@ def main(token: str):
                     route.expected_journey_minutes,
                     delay,
                 )
-                conn.execute(
-                    "INSERT INTO vlaky VALUES(?, ?, ?, ?, ?, ?, ?, ?)",
-                    (
-                        dt.date.today(),
-                        train.id,
-                        train.name,
-                        route.carrier,
-                        route.stations[0].name,
-                        route.stations[-1].name,
-                        route.expected_journey_minutes,
-                        delay,
-                    ),
-                )
-                conn.commit()
                 if train in all_routes:
                     del all_routes[train]
+            conn.execute(
+                "INSERT INTO vlaky VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    dt.date.today(),
+                    train.id,
+                    train.name,
+                    route.carrier,
+                    route.stations[0].name,
+                    route.stations[-1].name,
+                    route.stations[-1].planned_arrival.isoformat(),
+                    route.expected_journey_minutes,
+                    delay,
+                    route.arrived,
+                ),
+            )
+            conn.commit()
+
             all_routes[train] = route
 
             time.sleep(1)
