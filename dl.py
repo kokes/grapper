@@ -10,6 +10,22 @@ import sqlite3
 
 import lxml.html
 
+"""
+-- zakladni analytika
+SELECT
+	provozovatel,
+	count(*) pocet_jizd,
+	round(avg(zpozdeni), 2) prumerne_zpozdeni,
+	round(sum(case when zpozdeni <= 5 then 1 else 0 end)/cast(count(*) as float), 2) pod_5min,
+	round(sum(case when zpozdeni <= 15 then 1 else 0 end)/cast(count(*) as float), 2) pod_15min
+FROM
+	vlaky
+GROUP BY
+	1
+ORDER BY 2 desc
+LIMIT 100
+"""
+
 
 HTTP_TIMEOUT = 30
 
@@ -26,7 +42,7 @@ URL_ROUTEINFO = "https://grapp.spravazeleznic.cz/OneTrain/RouteInfo/{APP_ID}?tra
 SQLITE_TRAINS = """
 CREATE TABLE vlaky (
     datum DATE NOT NULL,
-    id INT NOT NULL,
+    id INT NOT NULL, -- TODO: unique? pk?
     nazev TEXT NOT NULL,
     provozovatel TEXT NOT NULL,
     stanice_vychozi TEXT NOT NULL,
@@ -163,7 +179,8 @@ if __name__ == "__main__":
         for new_train in new_trains:
             all_routes[new_train] = None
 
-        for train in all_routes.keys():
+        # materializace, protoze budem menit slovnik
+        for train in list(all_routes.keys()):
             ts = int(dt.datetime.now().timestamp())
             url = URL_ROUTEINFO.format(train_id=train.id, ts=ts, APP_ID=APP_ID)
             with urlopen(url, timeout=HTTP_TIMEOUT) as r:
