@@ -28,7 +28,7 @@ LIMIT 100
 """
 
 
-HTTP_TIMEOUT = 30
+HTTP_TIMEOUT = 10
 
 URL_ALL_TRAINS = (
     "https://grapp.spravazeleznic.cz/post/trains/GetTrainsWithFilter/{APP_ID}"
