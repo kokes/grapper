@@ -6,6 +6,7 @@ import datetime as dt
 from dataclasses import dataclass
 from urllib.request import urlopen, Request
 from typing import Optional
+import socket
 import sqlite3
 
 import lxml.html
@@ -28,9 +29,6 @@ LIMIT 100
 
 
 HTTP_TIMEOUT = 30
-
-APP_ID = "D9887D056D3E1E0593B5DAF1BC43807E79E943C166B97097CBF249FBB93F80AA"  # TODO: tohle se bude menit
-# <input type="hidden" id="token" value="D9887D056D3E1E0593B5DAF1BC43807E79E943C166B97097CBF249FBB93F80AA" />
 
 URL_ALL_TRAINS = (
     "https://grapp.spravazeleznic.cz/post/trains/GetTrainsWithFilter/{APP_ID}"
@@ -78,8 +76,8 @@ class Route:
     arrived: bool
 
 
-def get_all_trains():
-    req = Request(URL_ALL_TRAINS.format(APP_ID=APP_ID))
+def get_all_trains(token):
+    req = Request(URL_ALL_TRAINS.format(APP_ID=token))
     req.add_header("content-type", "application/json; charset=UTF-8")
     req.data = BODY_ALL_TRAINS
     with urlopen(req, timeout=HTTP_TIMEOUT) as r:
@@ -88,7 +86,7 @@ def get_all_trains():
     return {Train(id=j["Id"], name=j["Title"].strip()) for j in dt["Trains"]}
 
 
-def parse_route_from_html(ht) -> Optional[Route]:
+def parse_route_from_html(ht, train) -> Optional[Route]:
     if ht.find(".//div[@class='alertTitle']") is not None:
         return None
     carrier = ht.find(".//a[@class='carrierRestrictionLink']").text.strip()
@@ -143,9 +141,7 @@ def delay_minutes(planned, actual):
     ).total_seconds() / 60
 
 
-if __name__ == "__main__":
-    logging.getLogger().setLevel(logging.INFO)  # TODO: time
-
+def main(token: str):
     dbfile = "vlaky.db"
     dbexists = os.path.isfile(dbfile)
     conn = sqlite3.connect(dbfile)
@@ -160,7 +156,7 @@ if __name__ == "__main__":
 
     all_routes = dict()
     while True:
-        trains = get_all_trains()
+        trains = get_all_trains(token)
         assert (
             len(trains) > 0
         )  # TODO: refreshuj token (ten ale muze expirovat i u tech vlaku samotnych)
@@ -182,7 +178,7 @@ if __name__ == "__main__":
         # materializace, protoze budem menit slovnik
         for train in list(all_routes.keys()):
             ts = int(dt.datetime.now().timestamp())
-            url = URL_ROUTEINFO.format(train_id=train.id, ts=ts, APP_ID=APP_ID)
+            url = URL_ROUTEINFO.format(train_id=train.id, ts=ts, APP_ID=token)
             with urlopen(url, timeout=HTTP_TIMEOUT) as r:
                 data = r.read().decode("utf-8")
                 # TODO: smaz (jen pro introspekci)
@@ -191,7 +187,7 @@ if __name__ == "__main__":
 
                 ht = lxml.html.fromstring(data)
 
-            route = parse_route_from_html(ht)
+            route = parse_route_from_html(ht, train)
             if not route:
                 logging.info("Info o vlaku %s uz neni", train.name)
                 if train in all_routes:
@@ -231,3 +227,19 @@ if __name__ == "__main__":
             all_routes[train] = route
 
             time.sleep(1)
+
+
+if __name__ == "__main__":
+    logging.getLogger().setLevel(logging.INFO)  # TODO: time
+
+    with urlopen("https://grapp.spravazeleznic.cz", timeout=HTTP_TIMEOUT) as r:
+        ht = lxml.html.parse(r)
+        token = ht.find(".//input[@id='token']").value
+        logging.info("mame token: %s", token)
+
+    while True:
+        try:
+            main(token)
+        except socket.timeout:
+            logging.info("timeout ¯\_(ツ)_/¯")
+            time.sleep(15)
