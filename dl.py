@@ -51,6 +51,37 @@ def get_all_trains():
 
     return {Train(id=j["Id"], name=j["Title"].strip()) for j in dt["Trains"]}
 
+def parse_route_from_html(dt: str) -> Route:
+    carrier = ht.find(".//a[@class='carrierRestrictionLink']").text.strip()
+    # nekdy je to odkaz, nekdy span
+    current_station = ht.find(".//*[@id='currentStation']").text_content().strip()
+
+    rows = ht.find(".//div[@class='route']").findall("div[@class='row']")
+    stations = []
+    for row in rows:
+        name = row.find("div").text_content().strip()
+        # obcas nejsou ctyri, nevim uplne proc
+        spans = [j.text_content().strip() for j in row.findall(".//span")][:4]
+        # if len(spans) != 4:
+        #     breakpoint()
+        assert len(spans) == 4, spans
+        station = Station(
+            name=name,
+            actual_arrival=spans[0],
+            planned_arrival=spans[1].replace("(", "").replace(")", ""),
+            actual_departure=spans[2],
+            planned_departure=spans[3].replace("(", "").replace(")", ""),
+        )
+        stations.append(station)
+
+    assert len(stations) > 0
+
+    return Route(
+        train=train,
+        carrier=carrier,
+        stations=stations,
+        arrived=current_station == stations[-1].name
+    )
 
 if __name__ == "__main__":
     logging.getLogger().setLevel(logging.INFO)  # TODO: time
@@ -77,40 +108,8 @@ if __name__ == "__main__":
 
                 ht = lxml.html.fromstring(dt)
 
-            carrier = ht.find(".//a[@class='carrierRestrictionLink']").text.strip()
-            current_station = ht.find(".//a[@id='currentStation']").text_content().strip()
-
-            rows = ht.find(".//div[@class='route']").findall("div[@class='row']")
-            stations = []
-            for row in rows:
-                name = row.find("div").text_content().strip()
-                actuals = [
-                    j.text_content().strip()
-                    for j in row.findall(".//span[@class='delayFuture_text']") + row.findall(".//span[@class='delayTo5_text']")
-                ][:2] # obcas tam jsou ctyri, nevim proc
-                if len(actuals) != 2:
-                    breakpoint()
-                assert len(actuals) == 2, actuals
-                planned = [
-                    j.text_content().strip().replace("(", "").replace(")", "")
-                    for j in row.findall(".//span[@class='timeTT']")
-                ][:2]
-                assert len(planned) == 2, planned
-                station = Station(
-                    name=name,
-                    actual_arrival=actuals[0],
-                    actual_departure=actuals[1],
-                    planned_arrival=planned[0],
-                    planned_departure=planned[1],
-                )
-                stations.append(station)
-
-            route = Route(
-                train=train,
-                carrier=carrier,
-                stations=stations,
-                arrived=current_station == stations[-1].name
-            )
+            route = parse_route_from_html(dt)
+            
             breakpoint()
 
         time.sleep(ALL_TRAINS_TICK_SECONDS)
