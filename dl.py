@@ -235,13 +235,13 @@ def main(token: str):
 if __name__ == "__main__":
     logging.getLogger().setLevel(logging.INFO)  # TODO: time
 
-    with urlopen("https://grapp.spravazeleznic.cz", timeout=HTTP_TIMEOUT) as r:
-        ht = lxml.html.parse(r)
-        token = ht.find(".//input[@id='token']").value
-        logging.info("mame token: %s", token)
-
     while True:
         try:
+            with urlopen("https://grapp.spravazeleznic.cz", timeout=HTTP_TIMEOUT) as r:
+                ht = lxml.html.parse(r)
+                token = ht.find(".//input[@id='token']").value
+                logging.info("mame token: %s", token)
+
             main(token)
         except socket.timeout:
             logging.info("timeout ¯\_(ツ)_/¯")
