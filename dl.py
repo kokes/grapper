@@ -1,23 +1,40 @@
 import json
 import logging
 import time
+import os
 import datetime as dt
 from dataclasses import dataclass
 from urllib.request import urlopen, Request
 from typing import Optional
+import sqlite3
 
 import lxml.html
 
 
-HTTP_TIMEOUT = 10
+HTTP_TIMEOUT = 30
 
-APP_ID = "D9887D056D3E1E0593B5DAF1BC43807E79E943C166B97097CBF249FBB93F80AA" # TODO: tohle se bude menit
+APP_ID = "D9887D056D3E1E0593B5DAF1BC43807E79E943C166B97097CBF249FBB93F80AA"  # TODO: tohle se bude menit
 # <input type="hidden" id="token" value="D9887D056D3E1E0593B5DAF1BC43807E79E943C166B97097CBF249FBB93F80AA" />
 
-URL_ALL_TRAINS = "https://grapp.spravazeleznic.cz/post/trains/GetTrainsWithFilter/{APP_ID}"
+URL_ALL_TRAINS = (
+    "https://grapp.spravazeleznic.cz/post/trains/GetTrainsWithFilter/{APP_ID}"
+)
 BODY_ALL_TRAINS = b'{"CarrierCode":["991919","992230","992719","993030","990010","993188","991943","991950","991075","993196","992693","991638","991976","993089","993162","991257","991935","991562","991125","992644","992842","991927","993170","991810","992909","991612","f_o_r_e_i_g_n"],"PublicKindOfTrain":["LE","Ex","Sp","rj","TL","EC","SC","AEx","Os","Rx","TLX","IC","EN","R","RJ","nj","LET"],"FreightKindOfTrain":[],"TrainRunning":false,"TrainNoChange":0,"TrainOutOfOrder":false,"Delay":["0","60","5","61","15","-1","30"],"DelayMin":-99999,"DelayMax":-99999,"SearchByTrainNumber":true,"SearchExtraTrain":false,"SearchByTrainName":true,"SearchByTRID":false,"SearchByVehicleNumber":false,"SearchTextType":"0","SearchPhrase":"","SelectedTrain":-1}'
 
 URL_ROUTEINFO = "https://grapp.spravazeleznic.cz/OneTrain/RouteInfo/{APP_ID}?trainId={train_id}&_={ts}"
+
+SQLITE_TRAINS = """
+CREATE TABLE vlaky (
+    datum DATE NOT NULL,
+    id INT NOT NULL,
+    nazev TEXT NOT NULL,
+    provozovatel TEXT NOT NULL,
+    stanice_vychozi TEXT NOT NULL,
+    stanice_cilova TEXT NOT NULL,
+    delka_cesty FLOAT NOT NULL,
+    zpozdeni FLOAT NOT NULL
+)
+"""
 
 
 @dataclass(frozen=True)
@@ -56,7 +73,7 @@ def get_all_trains():
 
 
 def parse_route_from_html(ht) -> Optional[Route]:
-    if ht.find(".//div[@class='alertTitle']"):
+    if ht.find(".//div[@class='alertTitle']") is not None:
         return None
     carrier = ht.find(".//a[@class='carrierRestrictionLink']").text.strip()
     # nekdy je to odkaz, nekdy span
@@ -68,11 +85,16 @@ def parse_route_from_html(ht) -> Optional[Route]:
         name = row.find("div").text_content().strip()
         # obcas nejsou ctyri, nevim uplne proc
         # a prvni span je obcas soucasna stanice, tak tu musime vyradit
-        spans = [j.text_content().strip() for j in row.xpath(".//span[not(@id='currentStation')]")][:4]
+        spans = [
+            j.text_content().strip()
+            for j in row.xpath(".//span[not(@id='currentStation')]")
+        ][:4]
         if len(spans) != 4:
             breakpoint()
         assert len(spans) == 4, spans
-        spans = [dt.time.fromisoformat(j.replace("(", "").replace(")", "")) for j in spans]
+        spans = [
+            dt.time.fromisoformat(j.replace("(", "").replace(")", "")) for j in spans
+        ]
 
         station = Station(
             name=name,
@@ -89,25 +111,48 @@ def parse_route_from_html(ht) -> Optional[Route]:
         train=train,
         carrier=carrier,
         stations=stations,
-        expected_journey_minutes=delay_minutes(stations[0].planned_departure, stations[-1].planned_arrival),
+        expected_journey_minutes=delay_minutes(
+            stations[0].planned_departure, stations[-1].planned_arrival
+        ),
         arrived=current_station == stations[-1].name,
     )
+
 
 # tady predpokladame, ze oba casy jsou ze stejneho dne
 # (coz nebude platit vzdy)
 def delay_minutes(planned, actual):
     today = dt.datetime.today()
-    return (dt.datetime.combine(today, actual) - dt.datetime.combine(today, planned)).total_seconds() / 60
+    return (
+        dt.datetime.combine(today, actual) - dt.datetime.combine(today, planned)
+    ).total_seconds() / 60
 
 
 if __name__ == "__main__":
     logging.getLogger().setLevel(logging.INFO)  # TODO: time
+
+    dbfile = "vlaky.db"
+    dbexists = os.path.isfile(dbfile)
+    conn = sqlite3.connect(dbfile)
+    if not dbexists:
+        conn.execute(SQLITE_TRAINS)
+
+    arrived = set()
+    cur = conn.execute("SELECT id, nazev FROM vlaky").fetchall()
+    for tid, name in cur:
+        arrived.add(Train(id=tid, name=name))
+    logging.info("Načteno %d dorazivších vlaků", len(cur))
+
     all_routes = dict()
-    arrived = set() # TODO: nacti odnekud z db
     while True:
         trains = get_all_trains()
-        assert len(trains) > 0 # TODO: refreshuj token (ten ale muze expirovat i u tech vlaku samotnych)
-        logging.info("načteno %d vlaků", len(trains))
+        assert (
+            len(trains) > 0
+        )  # TODO: refreshuj token (ten ale muze expirovat i u tech vlaku samotnych)
+        logging.info(
+            "načteno %d vlaků (%d po odečtení již zapsaných)",
+            len(trains),
+            len(trains - arrived),
+        )
         new_trains = trains - set(all_routes.keys()) - arrived
         removed_trains = set(all_routes.keys()) - trains - arrived
         if all_routes and new_trains:
@@ -137,15 +182,33 @@ if __name__ == "__main__":
                 continue
             if route.arrived:
                 arrived.add(train)
+                delay = delay_minutes(
+                    route.stations[-1].planned_arrival,
+                    route.stations[-1].actual_arrival,
+                )
                 logging.info(
                     "Vlak %s (%s) dojel. [%s, %s]. Plánovaná jízda: %s, zpoždění (minut): %s",
                     train.name,
                     route.carrier,
-                    route.stations[0].name, route.stations[-1].name,
+                    route.stations[0].name,
+                    route.stations[-1].name,
                     route.expected_journey_minutes,
-                    delay_minutes(route.stations[-1].planned_arrival, route.stations[-1].actual_arrival),
+                    delay,
                 )
-                # TODO: zapisuj nekam
+                conn.execute(
+                    "INSERT INTO vlaky VALUES(?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        dt.date.today(),
+                        train.id,
+                        train.name,
+                        route.carrier,
+                        route.stations[0].name,
+                        route.stations[-1].name,
+                        route.expected_journey_minutes,
+                        delay,
+                    ),
+                )
+                conn.commit()
                 if train in all_routes:
                     del all_routes[train]
             all_routes[train] = route
