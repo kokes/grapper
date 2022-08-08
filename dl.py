@@ -49,7 +49,7 @@ CREATE TABLE vlaky (
     ocekavany_prijezd TIME NOT NULL,
     delka_cesty_minut FLOAT NOT NULL,
     zpozdeni FLOAT,
-    dojel BOOL NOT NULL
+    dojel BOOL NOT NULL -- TODO: pocitat zpozdeni na trati (ignorovat cas pristaveni vlaku)
 )
 """
 
@@ -177,24 +177,22 @@ def main(token: str):
         assert len(trains) > 0
         logging.info("načteno %d vlaků z API", len(trains))
         new_trains = trains - set(all_routes.keys())
-        removed_trains = set(all_routes.keys()) - trains
         if all_routes and new_trains:
             logging.info("%d nových vlaků", len(new_trains))
-        if all_routes and removed_trains:
-            logging.info("%d odebraných vlaků", len(removed_trains))
 
         for new_train in new_trains:
             all_routes[new_train] = None
 
+        for route in list(all_routes.keys()):
+            if all_routes[route] and all_routes[route].arrived:
+                del all_routes[route]
+
         # materializace, protoze budem menit slovnik
         randomised = list(all_routes.keys())
         random.shuffle(randomised)
+        logging.info("Nahravám info o %d vlacích", len(randomised))
         for train in randomised:
             if all_routes.get(train):
-                if all_routes[train].arrived:
-                    del all_routes[train]
-                    continue
-
                 # logging.info("tenhle vlak (%s) jsme uz videli", train)
                 arrival = dt.datetime.combine(
                     dt.date.today(), all_routes[train].planned_arrival
@@ -202,6 +200,7 @@ def main(token: str):
                 # logging.info("ocekavame ho v %s", arrival)
                 if dt.datetime.now() < arrival - dt.timedelta(minutes=15):
                     # logging.info("Jeste ho nebudem nacitat, je moc brzo")
+                    # abychom nemeli superrychlou loopu ve chvili, kdy uz mame nacachovano vsechno
                     time.sleep(1)
                     continue
 
