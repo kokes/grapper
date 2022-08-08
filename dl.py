@@ -3,6 +3,7 @@ import logging
 import time
 import os
 import datetime as dt
+import random
 from dataclasses import dataclass
 from urllib.request import urlopen, Request
 from typing import Optional
@@ -68,7 +69,6 @@ class Station:
 
 @dataclass
 class Route:
-    # last_checked: dt.datetime # TODO: nekontroluj routu kazdou minutu
     train: Train
     carrier: str
     stations: list[Station]
@@ -179,7 +179,20 @@ def main(token: str):
             all_routes[new_train] = None
 
         # materializace, protoze budem menit slovnik
-        for train in list(all_routes.keys()):
+        randomised = list(all_routes.keys())
+        random.shuffle(randomised)
+        for train in randomised:
+            if all_routes.get(train):
+                # logging.info("tenhle vlak (%s) jsme uz videli", train)
+                arrival = dt.datetime.combine(
+                    dt.date.today(), all_routes[train].stations[-1].planned_arrival
+                )
+                # logging.info("ocekavame ho v %s", arrival)
+                if dt.datetime.now() < arrival - dt.timedelta(minutes=15):
+                    # logging.info("Jeste ho nebudem nacitat, je moc brzo")
+                    time.sleep(1)
+                    continue
+
             ts = int(dt.datetime.now().timestamp())
             url = URL_ROUTEINFO.format(train_id=train.id, ts=ts, APP_ID=token)
             with urlopen(url, timeout=HTTP_TIMEOUT) as r:
