@@ -17,9 +17,9 @@ import lxml.html
 SELECT
 	provozovatel,
 	count(*) pocet_jizd,
-	round(avg(zpozdeni), 2) prumerne_zpozdeni,
-	round(sum(case when zpozdeni <= 5 then 1 else 0 end)/cast(count(*) as float), 2) pod_5min,
-	round(sum(case when zpozdeni <= 15 then 1 else 0 end)/cast(count(*) as float), 2) pod_15min
+	round(avg(zpozdeni_prijezd), 2) prumerne_zpozdeni,
+	round(sum(case when zpozdeni_prijezd <= 5 then 1 else 0 end)/cast(count(*) as float), 2) pod_5min,
+	round(sum(case when zpozdeni_prijezd <= 15 then 1 else 0 end)/cast(count(*) as float), 2) pod_15min
 FROM
 	vlaky
 WHERE dojel is TRUE
@@ -41,7 +41,7 @@ URL_ROUTEINFO = "https://grapp.spravazeleznic.cz/OneTrain/RouteInfo/{APP_ID}?tra
 
 SQLITE_TRAINS = """
 CREATE TABLE vlaky (
-    datum DATE NOT NULL,
+    ts TIMESTAMP NOT NULL,
     id INT PRIMARY_KEY UNIQUE NOT NULL,
     nazev TEXT NOT NULL,
     provozovatel TEXT NOT NULL,
@@ -257,7 +257,7 @@ def main(token: str):
                     realny_prijezd=excluded.realny_prijezd
                 """,
                 (
-                    dt.date.today(),
+                    dt.datetime.now(),
                     train.id,
                     train.name,
                     route.carrier,
