@@ -42,7 +42,8 @@ URL_ROUTEINFO = "https://grapp.spravazeleznic.cz/OneTrain/RouteInfo/{APP_ID}?tra
 
 SQLITE_TRAINS = """
 CREATE TABLE vlaky (
-    ts TIMESTAMP NOT NULL,
+    vlozeno TIMESTAMP NOT NULL,
+    aktualizovano TIMESTAMP NOT NULL,
     id INT PRIMARY_KEY UNIQUE NOT NULL,
     nazev TEXT NOT NULL,
     provozovatel TEXT NOT NULL,
@@ -206,7 +207,7 @@ def main(token: str):
                     tzinfo=tz,
                 )
                 # logging.info("ocekavame ho v %s", arrival)
-                if dt.datetime.now(tz=tz) < arrival - dt.timedelta(minutes=15):
+                if dt.datetime.now(tz=tz) < arrival - dt.timedelta(minutes=5):
                     # logging.info("Jeste nebudem nacitat %s, je moc brzo", train)
                     continue
 
@@ -247,9 +248,11 @@ def main(token: str):
                     route.expected_journey_minutes,
                     delay_arrival,
                 )
+            now = dt.datetime.now(tz=tz)
             conn.execute(
-                """INSERT INTO vlaky VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """INSERT INTO vlaky VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT DO UPDATE SET
+                    aktualizovano=excluded.aktualizovano,
                     zpozdeni_odjezd=excluded.zpozdeni_odjezd,
                     zpozdeni_prijezd=excluded.zpozdeni_prijezd,
                     dojel=excluded.dojel,
@@ -257,7 +260,8 @@ def main(token: str):
                     realny_prijezd=excluded.realny_prijezd
                 """,
                 (
-                    dt.datetime.now(tz=tz),
+                    now,
+                    now,
                     train.id,
                     train.name,
                     route.carrier,
