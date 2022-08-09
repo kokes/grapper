@@ -47,10 +47,14 @@ CREATE TABLE vlaky (
     provozovatel TEXT NOT NULL,
     stanice_vychozi TEXT NOT NULL,
     stanice_cilova TEXT NOT NULL,
+    ocekavany_odjezd TIME NOT NULL,
+    realny_odjezd TIME NOT NULL,
     ocekavany_prijezd TIME NOT NULL,
-    delka_cesty_minut FLOAT NOT NULL,
-    zpozdeni FLOAT,
-    dojel BOOL NOT NULL -- TODO: pocitat zpozdeni na trati (ignorovat cas pristaveni vlaku)
+    realny_prijezd TIME NOT NULL,
+    delka_cesty_minut INT NOT NULL, -- TODO: generated always as (stejne jako dalsi dva)
+    zpozdeni_odjezd INT,
+    zpozdeni_prijezd INT,
+    dojel BOOL NOT NULL
 )
 """
 
@@ -76,7 +80,7 @@ class Route:
     carrier: str
     stations: list[Station]
     planned_arrival: time
-    expected_journey_minutes: float
+    expected_journey_minutes: int
     arrived: bool
 
 
@@ -222,9 +226,13 @@ def main(token: str):
                     del all_routes[train]
                 continue
 
-            delay = None
+            delay_departure, delay_arrival = None, None
             if route.arrived:
-                delay = delay_minutes(
+                delay_departure = delay_minutes(
+                    route.stations[0].planned_departure,
+                    route.stations[0].actual_departure,
+                )
+                delay_arrival = delay_minutes(
                     route.stations[-1].planned_arrival,
                     route.stations[-1].actual_arrival,
                 )
@@ -235,15 +243,18 @@ def main(token: str):
                     route.stations[0].name,
                     route.stations[-1].name,
                     route.expected_journey_minutes,
-                    delay,
+                    delay_arrival,
                 )
                 if train in all_routes:
                     del all_routes[train]
             conn.execute(
-                """INSERT INTO vlaky VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """INSERT INTO vlaky VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT DO UPDATE SET
-                    zpozdeni=excluded.zpozdeni,
-                    dojel=excluded.dojel
+                    zpozdeni_odjezd=excluded.zpozdeni_odjezd,
+                    zpozdeni_prijezd=excluded.zpozdeni_prijezd,
+                    dojel=excluded.dojel,
+                    realny_odjezd=excluded.realny_odjezd,
+                    realny_prijezd=excluded.realny_prijezd
                 """,
                 (
                     dt.date.today(),
@@ -252,9 +263,13 @@ def main(token: str):
                     route.carrier,
                     route.stations[0].name,
                     route.stations[-1].name,
+                    route.stations[0].planned_departure.isoformat(),
+                    route.stations[0].actual_departure.isoformat(),
                     route.stations[-1].planned_arrival.isoformat(),
+                    route.stations[-1].actual_arrival.isoformat(),
                     route.expected_journey_minutes,
-                    delay,
+                    delay_departure,
+                    delay_arrival,
                     route.arrived,
                 ),
             )
