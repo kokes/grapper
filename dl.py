@@ -9,6 +9,7 @@ from urllib.request import urlopen, Request
 from typing import Optional
 import socket
 import sqlite3
+import zoneinfo
 
 import lxml.html
 
@@ -57,6 +58,8 @@ CREATE TABLE vlaky (
     dojel BOOL NOT NULL
 )
 """
+
+tz = zoneinfo.ZoneInfo("Europe/Prague")
 
 
 @dataclass(frozen=True, order=True)
@@ -188,29 +191,28 @@ def main(token: str):
         for new_train in new_trains:
             all_routes[new_train] = None
 
-        for route in list(all_routes.keys()):
-            if all_routes[route] and all_routes[route].arrived:
-                del all_routes[route]
-
         # materializace, protoze budem menit slovnik
         randomised = list(all_routes.keys())
         random.shuffle(randomised)
         logging.info("Nahravám info o %d vlacích", len(randomised))
         for train in randomised:
             if all_routes.get(train):
+                if all_routes[train].arrived:
+                    continue
                 # logging.info("tenhle vlak (%s) jsme uz videli", train)
                 arrival = dt.datetime.combine(
-                    dt.date.today(), all_routes[train].planned_arrival
+                    dt.date.today(),
+                    all_routes[train].planned_arrival,
+                    tzinfo=tz,
                 )
                 # logging.info("ocekavame ho v %s", arrival)
-                if dt.datetime.now() < arrival - dt.timedelta(minutes=15):
-                    # logging.info("Jeste ho nebudem nacitat, je moc brzo")
-                    # abychom nemeli superrychlou loopu ve chvili, kdy uz mame nacachovano vsechno
-                    time.sleep(1)
+                if dt.datetime.now(tz=tz) < arrival - dt.timedelta(minutes=15):
+                    # logging.info("Jeste nebudem nacitat %s, je moc brzo", train)
                     continue
 
-            ts = int(dt.datetime.now().timestamp())
+            ts = int(dt.datetime.now(tz=tz).timestamp())
             url = URL_ROUTEINFO.format(train_id=train.id, ts=ts, APP_ID=token)
+            logging.info("Načítám údaje o vlaku %s", train)
             with urlopen(url, timeout=HTTP_TIMEOUT) as r:
                 data = r.read().decode("utf-8")
                 # TODO: smaz (jen pro introspekci)
@@ -245,8 +247,6 @@ def main(token: str):
                     route.expected_journey_minutes,
                     delay_arrival,
                 )
-                if train in all_routes:
-                    del all_routes[train]
             conn.execute(
                 """INSERT INTO vlaky VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT DO UPDATE SET
@@ -257,7 +257,7 @@ def main(token: str):
                     realny_prijezd=excluded.realny_prijezd
                 """,
                 (
-                    dt.datetime.now(),
+                    dt.datetime.now(tz=tz),
                     train.id,
                     train.name,
                     route.carrier,
@@ -278,6 +278,9 @@ def main(token: str):
             all_routes[train] = route
 
             time.sleep(1)
+
+        logging.info("Prošli jsme všechny jedoucí vlaky, jde se na další kolečko")
+        time.sleep(15)
 
 
 if __name__ == "__main__":
