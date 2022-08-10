@@ -63,6 +63,10 @@ CREATE TABLE vlaky (
 tz = zoneinfo.ZoneInfo("Europe/Prague")
 
 
+class TokenExpired(Exception):
+    ...
+
+
 @dataclass(frozen=True, order=True)
 class Train:
     id: int
@@ -141,20 +145,28 @@ def parse_route_from_html(ht, train) -> Optional[Route]:
         carrier=carrier,
         stations=stations,
         planned_arrival=stations[-1].planned_arrival,
-        expected_journey_minutes=delay_minutes(
+        expected_journey_minutes=time_diff(
             stations[0].planned_departure, stations[-1].planned_arrival
         ),
         arrived=current_station == stations[-1].name,
     )
 
 
-# tady predpokladame, ze oba casy jsou ze stejneho dne
-# (coz nebude platit vzdy)
-def delay_minutes(planned, actual):
+def time_diff(planned, actual):
     today = dt.datetime.today()
-    return (
-        dt.datetime.combine(today, actual) - dt.datetime.combine(today, planned)
-    ).total_seconds() / 60
+    a = dt.datetime.combine(today, planned)
+    b = dt.datetime.combine(today, actual)
+    # musime nejak resit dojezdy po pulnoci (nemame datum, jen cas)
+    # tak budem hadat, ze kdyz jsme vic jak tri hodiny pozadu, tak to
+    # bude asi dalsi den (tj. vlak nesmi jet vic jak 21 hodin)
+    # testy:
+    #   a=23:59, b=0:12 (13)
+    #   a=0:05, b=23:59 (-6) -- tady bude vetsi delta, protoze zpozdeni muze byt velky
+    if b < a and a - b > dt.timedelta(hours=3):
+        b += dt.timedelta(days=1)
+    if b > a and b - a > dt.timedelta(hours=12):
+        a += dt.timedelta(days=1)
+    return (b - a).total_seconds() / 60
 
 
 def main(token: str):
@@ -183,7 +195,8 @@ def main(token: str):
 
     while True:
         trains = get_all_trains(token)
-        assert len(trains) > 0
+        if len(trains) == 0:
+            raise TokenExpired()
         logging.info("načteno %d vlaků z API", len(trains))
         new_trains = trains - set(all_routes.keys())
         if all_routes and new_trains:
@@ -225,17 +238,19 @@ def main(token: str):
             route = parse_route_from_html(ht, train)
             if not route:
                 logging.info("Info o vlaku %s uz neni", train.name)
+                conn.execute("DELETE FROM vlaky WHERE id = ?", (train.id,))
+                conn.commit()
                 if train in all_routes:
                     del all_routes[train]
                 continue
 
             delay_departure, delay_arrival = None, None
             if route.arrived:
-                delay_departure = delay_minutes(
+                delay_departure = time_diff(
                     route.stations[0].planned_departure,
                     route.stations[0].actual_departure,
                 )
-                delay_arrival = delay_minutes(
+                delay_arrival = time_diff(
                     route.stations[-1].planned_arrival,
                     route.stations[-1].actual_arrival,
                 )
@@ -298,6 +313,6 @@ if __name__ == "__main__":
                 logging.info("mame token: %s", token)
 
             main(token)
-        except socket.timeout:
-            logging.info("timeout ¯\_(ツ)_/¯")
+        except (socket.timeout, TokenExpired):
+            logging.info("timeout/token expiration ¯\_(ツ)_/¯")
             time.sleep(15)
