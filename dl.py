@@ -178,7 +178,7 @@ def main(token: str):
 
     all_routes = dict()
     cur = conn.execute(
-        "SELECT id, nazev, ocekavany_prijezd, dojel FROM vlaky"
+        "SELECT id, nazev, ocekavany_prijezd, dojel FROM vlaky WHERE aktualizovano > date('now', '-1 day')"
     ).fetchall()
     for tid, name, arrival, arrived in cur:
         train = Train(id=tid, name=name)
