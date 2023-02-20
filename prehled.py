@@ -42,7 +42,7 @@ def datetime_from_stringtime(tm, now):
         if diff.total_seconds() < 8 * 3600:
             return cmb
 
-    #raise ValueError(f"cannot match time to day: {tm}")
+    # raise ValueError(f"cannot match time to day: {tm}")
     return None
 
 
@@ -114,7 +114,16 @@ if __name__ == "__main__":
                     )
                     continue
 
-                date = dt.datetime.fromisoformat(last[0][0]).date()
+                ts = dt.datetime.fromisoformat(last[0][0])
+                if ts < dt.datetime.now(tz=tz) - dt.timedelta(hours=12):
+                    logging.info(
+                        "Vlak %s %s (%s) nejspis nepatri k nam do dat",
+                        train_no,
+                        train_name,
+                        carrier,
+                    )
+                    continue
+                date = ts.date()
                 logging.info("Prijezd: %s %s (%s)", train_no, train_name, carrier)
 
             if latest_st == dep_st:
