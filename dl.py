@@ -1,15 +1,16 @@
+import datetime as dt
+import http.cookiejar
 import json
 import logging
-import time
 import os
-import datetime as dt
 import random
-from dataclasses import dataclass
-from urllib.request import urlopen, Request
-from typing import Optional
 import socket
 import sqlite3
+import time
 import zoneinfo
+from dataclasses import dataclass
+from typing import Optional
+from urllib.request import HTTPCookieProcessor, Request, build_opener, urlopen
 
 import lxml.html
 
@@ -62,6 +63,9 @@ CREATE TABLE vlaky (
 
 tz = zoneinfo.ZoneInfo("Europe/Prague")
 
+cookie_jar = http.cookiejar.CookieJar()
+http_opener = build_opener(HTTPCookieProcessor(cookie_jar))
+
 
 class TokenExpired(Exception):
     ...
@@ -96,7 +100,7 @@ def get_all_trains(token):
     req = Request(URL_ALL_TRAINS.format(APP_ID=token))
     req.add_header("content-type", "application/json; charset=UTF-8")
     req.data = BODY_ALL_TRAINS
-    with urlopen(req, timeout=HTTP_TIMEOUT) as r:
+    with http_opener.open(req, timeout=HTTP_TIMEOUT) as r:
         dt = json.load(r)
 
     return {Train(id=j["Id"], name=j["Title"].strip()) for j in dt["Trains"]}
@@ -227,7 +231,7 @@ def main(token: str):
             ts = int(dt.datetime.now(tz=tz).timestamp())
             url = URL_ROUTEINFO.format(train_id=train.id, ts=ts, APP_ID=token)
             logging.info("Načítám údaje o vlaku %s", train)
-            with urlopen(url, timeout=HTTP_TIMEOUT) as r:
+            with http_opener.open(url, timeout=HTTP_TIMEOUT) as r:
                 data = r.read().decode("utf-8")
                 # TODO: smaz (jen pro introspekci)
                 with open(URL_ROUTEINFO.split("/")[4] + ".html", "wt") as fw:
@@ -307,7 +311,9 @@ if __name__ == "__main__":
 
     while True:
         try:
-            with urlopen("https://grapp.spravazeleznic.cz", timeout=HTTP_TIMEOUT) as r:
+            with http_opener.open(
+                "https://grapp.spravazeleznic.cz", timeout=HTTP_TIMEOUT
+            ) as r:
                 ht = lxml.html.parse(r)
                 token = ht.find(".//input[@id='token']").value
                 logging.info("mame token: %s", token)
