@@ -109,7 +109,8 @@ def get_all_trains(token):
 def parse_route_from_html(ht, train) -> Optional[Route]:
     if ht.find(".//div[@class='alertTitle']") is not None:
         return None
-    carrier = ht.find(".//a[@class='carrierRestrictionLink']").text.strip()
+    route_header = ht.find(".//div[@class='routeHeader']")
+    carrier = route_header.findall("div")[1].text_content().strip()
     # nekdy je to odkaz, nekdy span
     current_station_el = ht.find(".//*[@id='currentStation']")
     if current_station_el is None:
