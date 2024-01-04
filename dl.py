@@ -174,7 +174,7 @@ def time_diff(planned, actual):
     return (b - a).total_seconds() / 60
 
 
-def main(token: str):
+def main(token: str, is_ci: bool):
     dbfile = "vlaky.db"
     dbexists = os.path.isfile(dbfile)
     conn = sqlite3.connect(dbfile)
@@ -198,7 +198,12 @@ def main(token: str):
 
     logging.info("Načteno %d vlaků z disku", len(cur))
 
-    while True:
+    run = True
+    while run:
+        if is_ci:
+            logging.info("Spoustim v CI, koncim po jednom kole")
+            run = False
+
         trains = get_all_trains(token)
         if len(trains) == 0:
             raise TokenExpired()
@@ -210,25 +215,32 @@ def main(token: str):
         for new_train in new_trains:
             all_routes[new_train] = None
 
-        # materializace, protoze budem menit slovnik
-        randomised = list(all_routes.keys())
-        random.shuffle(randomised)
-        logging.info("Nahravám info o %d vlacích", len(randomised))
-        for train in randomised:
-            if all_routes.get(train):
-                if all_routes[train].arrived:
-                    continue
-                # logging.info("tenhle vlak (%s) jsme uz videli", train)
-                arrival = dt.datetime.combine(
-                    dt.date.today(),
-                    all_routes[train].planned_arrival,
-                    tzinfo=tz,
-                )
-                # logging.info("ocekavame ho v %s", arrival)
-                if dt.datetime.now(tz=tz) < arrival - dt.timedelta(minutes=5):
-                    # logging.info("Jeste nebudem nacitat %s, je moc brzo", train)
-                    continue
+        queued = set()
+        for train in all_routes.keys():
+            if not all_routes.get(train):
+                queued.add(train)
+                continue
+            if all_routes[train].arrived:
+                continue
+            # logging.info("tenhle vlak (%s) jsme uz videli", train)
+            arrival = dt.datetime.combine(
+                dt.date.today(),
+                all_routes[train].planned_arrival,
+                tzinfo=tz,
+            )
+            # logging.info("ocekavame ho v %s", arrival)
+            if dt.datetime.now(tz=tz) < arrival - dt.timedelta(minutes=5):
+                # logging.info("Jeste nebudem nacitat %s, je moc brzo", train)
+                continue
 
+            queued.add(train)
+
+        if is_ci:
+            logging.info("Spoustim v CI, beru jen cast vlaku")
+            queued = random.sample(list(queued), 20)
+
+        logging.info("Nahravám info o %d vlacích", len(queued))
+        for train in queued:
             ts = int(dt.datetime.now(tz=tz).timestamp())
             url = URL_ROUTEINFO.format(train_id=train.id, ts=ts, APP_ID=token)
             logging.info("Načítám údaje o vlaku %s", train)
@@ -280,8 +292,8 @@ def main(token: str):
                     realny_prijezd=excluded.realny_prijezd
                 """,
                 (
-                    now,
-                    now,
+                    now.isoformat(),
+                    now.isoformat(),
                     train.id,
                     train.name,
                     route.carrier,
@@ -303,14 +315,22 @@ def main(token: str):
 
             time.sleep(1)
 
-        logging.info("Prošli jsme všechny jedoucí vlaky, jde se na další kolečko")
-        time.sleep(15)
+        if not is_ci:
+            logging.info("Prošli jsme všechny jedoucí vlaky, jde se na další kolečko")
+            time.sleep(15)
 
 
 if __name__ == "__main__":
-    logging.getLogger().setLevel(logging.INFO)  # TODO: time
+    logging.basicConfig(
+        format="%(asctime)s %(levelname)s %(message)s", datefmt="%Y-%m-%d %H:%M:%S %Z"
+    )
+    logging.getLogger().setLevel(logging.INFO)
 
-    while True:
+    run, is_ci = True, False
+    while run:
+        is_ci = os.environ.get("CI") is not None
+        run = not is_ci
+
         try:
             with http_opener.open(
                 "https://grapp.spravazeleznic.cz", timeout=HTTP_TIMEOUT
@@ -319,7 +339,10 @@ if __name__ == "__main__":
                 token = ht.find(".//input[@id='token']").value
                 logging.info("mame token: %s", token)
 
-            main(token)
-        except (socket.timeout, TokenExpired):
-            logging.info("timeout/token expiration ¯\_(ツ)_/¯")
+            main(token, is_ci)
+        except (socket.timeout, TokenExpired) as e:
+            if is_ci:
+                raise e
+
+            logging.info(r"timeout/token expiration ¯\_(ツ)_/¯")
             time.sleep(15)
