@@ -127,8 +127,8 @@ def parse_route_from_html(ht, train) -> Optional[Route]:
             j.text_content().strip()
             for j in row.xpath(".//span[not(@id='currentStation')]")
         ][:4]
-        if len(spans) != 4:
-            breakpoint()
+        # if len(spans) != 4:
+        #     breakpoint()
         assert len(spans) == 4, spans
         spans = [
             dt.time.fromisoformat(j.replace("(", "").replace(")", "")) for j in spans
