@@ -1,0 +1,14 @@
+[Unit]
+Description=Datel downloader
+After=network.target
+
+[Service]
+Type=simple
+User=ondrej
+WorkingDirectory=/home/ondrej
+ExecStart=/home/ondrej/.venv/bin/python datel.py
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

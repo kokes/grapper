@@ -26,3 +26,6 @@ jobs:
     - name: Run dl
       run: |
         python dl.py
+    - name: Run datel
+      run: |
+        python datel.py
