@@ -94,7 +94,10 @@ if __name__ == "__main__":
             now = dt.datetime.now(SZ_TZ)
             for el in data["result"]:
                 props = el["properties"]
-                assert props["type"] == "V"
+                if props["type"] != "V":
+                    logging.info(
+                        "preskakujeme zaznam, ma neznamy typ: %s", props["type"]
+                    )
 
                 train_no = props["tt"] + " " + props["tn"]  # e.g. EC + 332
                 train_name = props["na"]
