@@ -126,7 +126,7 @@ if __name__ == "__main__":
                 if latest_st == dest_st:
                     # UNIQUE(cislo, nazev, provozovatel, datum_odjezd)
                     last = conn.execute(
-                        "SELECT ocekavany_odjezd FROM vlaky WHERE realny_prijezd IS NULL AND cislo = ? AND nazev = ? AND provozovatel = ? ORDER BY aktualizovano DESC LIMIT 1",
+                        "SELECT ocekavany_odjezd, realny_prijezd FROM vlaky WHERE cislo = ? AND nazev = ? AND provozovatel = ? ORDER BY aktualizovano DESC LIMIT 1",
                         (train_no, train_name, carrier),
                     ).fetchall()
                     # train arrived, but we don't have its departure -> skipping
@@ -138,6 +138,10 @@ if __name__ == "__main__":
                             train_name,
                             carrier,
                         )
+                        continue
+
+                    # vlak uz mame dojety
+                    if last[0][1]:
                         continue
 
                     ts = dt.datetime.fromisoformat(last[0][0])
