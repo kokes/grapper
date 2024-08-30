@@ -20,6 +20,7 @@ CREATE TABLE vlaky (
     stanice_cilova TEXT NOT NULL,
     ocekavany_odjezd TIMESTAMP NOT NULL,
     realny_odjezd TIMESTAMP NOT NULL,
+    posledni_potvrzena_stanice TEXT,
     ocekavany_prijezd TIMESTAMP,
     realny_prijezd TIMESTAMP,
     UNIQUE(cislo, nazev, provozovatel, datum_odjezd)
@@ -52,6 +53,7 @@ URL = r"https://mapy.spravazeleznic.cz/serverside/request2.php?module=Layers\OsV
 SZ_TZ = zoneinfo.ZoneInfo("Europe/Prague")
 
 FETCH_EVERY = dt.timedelta(seconds=15)
+CACHE_DIR = "cache"
 
 if __name__ == "__main__":
     ctx = ssl.create_default_context()
@@ -59,6 +61,14 @@ if __name__ == "__main__":
     ctx.verify_mode = ssl.CERT_NONE
 
     logging.getLogger().setLevel(logging.INFO)
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        handlers=[logging.FileHandler("datel.log"), logging.StreamHandler()],
+    )
+
+    os.makedirs(CACHE_DIR, exist_ok=True)
 
     dbfile = "prehled.db"
     dbexists = os.path.isfile(dbfile)
@@ -87,9 +97,34 @@ if __name__ == "__main__":
         last_fetch = dt.datetime.now()
         with urlopen(URL, context=ctx) as rr:
             data = json.load(rr)
+
+            # with open(
+            #     os.path.join(CACHE_DIR, last_fetch.isoformat() + ".json"), "wt"
+            # ) as fw:
+            #     for el in data["result"]:
+            #         json.dump(el, fw, ensure_ascii=False)
+            #         fw.write("\n")
+
             # data = json.load(open("payload.json"))
             assert data["success"]
             logging.info("Mame %s vlaku v pohybu", len(data["result"]))
+
+            out_there = {
+                j[0]
+                for j in conn.execute(
+                    "SELECT cislo FROM vlaky WHERE stanice_cilova != posledni_potvrzena_stanice ORDER BY aktualizovano DESC LIMIT 100"
+                )
+            }
+            in_data = {
+                j["properties"]["tt"] + " " + j["properties"]["tn"]
+                for j in data["result"]
+            }
+
+            if out_there - in_data:
+                logging.info(
+                    "Cekame na vlaky %s, ale nejsou v datech",
+                    sorted(out_there - in_data),
+                )
 
             now = dt.datetime.now(SZ_TZ)
             for el in data["result"]:
@@ -98,6 +133,7 @@ if __name__ == "__main__":
                     logging.info(
                         "preskakujeme zaznam, ma neznamy typ: %s", props["type"]
                     )
+                    continue
 
                 train_no = props["tt"] + " " + props["tn"]  # e.g. EC + 332
                 train_name = props["na"]
@@ -118,63 +154,48 @@ if __name__ == "__main__":
                 arrival_planned, arrival_real = planned_time, real_time
 
                 # only departures and arrivals
-                if not ((latest_st == dep_st) or (latest_st == dest_st)):
+                # nakonec jsme to kvuli tomu, ze preshranicni vlaky neumime zpracovat,
+                # protoze nemame mereni ze zahranici
+                # if not ((latest_st == dep_st) or (latest_st == dest_st)):
+                #     continue
+
+                # TODO: prespulnocni vlaky nebudou fungovat
+                date = planned_time.date().isoformat()
+                have = conn.execute(
+                    "SELECT count(*) FROM vlaky WHERE datum_odjezd = ? AND cislo = ? AND nazev = ? AND provozovatel = ?",
+                    (date, train_no, train_name, carrier),
+                ).fetchall()
+                # nemame vlak v db a zaroven uz je na ceste - musime skipnout
+                if have[0][0] == 0 and latest_st != dep_st:
                     continue
 
-                # TODO: vlak dojel v 00:30, jak pozname, jestli vyjel po pulnoci nebo pred ni?
-                # v tuhle chvili se divame na posledni zaznam v datech
-                if latest_st == dest_st:
-                    # UNIQUE(cislo, nazev, provozovatel, datum_odjezd)
-                    last = conn.execute(
-                        "SELECT ocekavany_odjezd, realny_prijezd FROM vlaky WHERE cislo = ? AND nazev = ? AND provozovatel = ? ORDER BY aktualizovano DESC LIMIT 1",
-                        (train_no, train_name, carrier),
-                    ).fetchall()
-                    # train arrived, but we don't have its departure -> skipping
-                    if len(last) != 1:
-                        continue
-                        logging.info(
-                            "Prijezd bez evidovaneho odjezdu: %s %s (%s)",
-                            train_no,
-                            train_name,
-                            carrier,
-                        )
-                        continue
+                # TODO: tohle reimplementoavt?
 
-                    # vlak uz mame dojety
-                    if last[0][1]:
-                        continue
+                # # UNIQUE(cislo, nazev, provozovatel, datum_odjezd)
+                # last = conn.execute(
+                #     "SELECT ocekavany_odjezd, realny_prijezd FROM vlaky WHERE cislo = ? AND nazev = ? AND provozovatel = ? ORDER BY aktualizovano DESC LIMIT 1",
+                #     (train_no, train_name, carrier),
+                # ).fetchall()
 
-                    ts = dt.datetime.fromisoformat(last[0][0])
-                    if ts < dt.datetime.now(SZ_TZ) - dt.timedelta(hours=12):
-                        logging.info(
-                            "Vlak %s %s (%s) nejspis nepatri k nam do dat",
-                            train_no,
-                            train_name,
-                            carrier,
-                        )
-                        continue
-                    date = ts.date()
-                    logging.info("Prijezd: %s %s (%s)", train_no, train_name, carrier)
-
-                if latest_st == dep_st:
-                    date = planned_time.date().isoformat()
-                    arrival_planned, arrival_real = None, None
-                    have = conn.execute(
-                        "SELECT count(*) FROM vlaky WHERE datum_odjezd = ? AND cislo = ? AND nazev = ? AND provozovatel = ?",
-                        (date, train_no, train_name, carrier),
-                    ).fetchall()
-                    # our departure is in the db already
-                    if have[0][0] == 1:
-                        continue
-
-                    logging.info("Odjezd: %s %s (%s)", train_no, train_name, carrier)
+                # ts = dt.datetime.fromisoformat(last[0][0])
+                # if ts < dt.datetime.now(SZ_TZ) - dt.timedelta(hours=12):
+                #     logging.info(
+                #         "Vlak %s %s (%s) nejspis nepatri k nam do dat",
+                #         train_no,
+                #         train_name,
+                #         carrier,
+                #     )
+                #     continue
+                # date = ts.date()
+                # logging.info("Prijezd: %s %s (%s)", train_no, train_name, carrier)
 
                 # TODO: asi by bylo cistsi ziskat si ID v tom prijezdu a podle nej udelat UPDATE
                 # a v te druhe branch udelat jednoduchy INSERT
                 conn.execute(
-                    """INSERT INTO vlaky VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """INSERT INTO vlaky VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         ON CONFLICT DO UPDATE SET
                             aktualizovano=excluded.aktualizovano,
+                            posledni_potvrzena_stanice=excluded.posledni_potvrzena_stanice,
                             ocekavany_prijezd=excluded.ocekavany_prijezd,
                             realny_prijezd=excluded.realny_prijezd
                         """,
@@ -189,6 +210,7 @@ if __name__ == "__main__":
                         dest_st,
                         departure_planned.isoformat(),
                         departure_real.isoformat(),
+                        latest_st,
                         arrival_planned.isoformat() if arrival_planned else None,
                         arrival_real.isoformat() if arrival_real else None,
                     ),
