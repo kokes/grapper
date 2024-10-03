@@ -7,12 +7,12 @@ import random
 import socket
 import sqlite3
 import time
-import zoneinfo
 from dataclasses import dataclass
 from typing import Optional
-from urllib.request import HTTPCookieProcessor, Request, build_opener, urlopen
+from urllib.request import HTTPCookieProcessor, Request, build_opener
 
 import lxml.html
+import zoneinfo
 
 """
 -- zakladni analytika
@@ -37,7 +37,7 @@ HTTP_TIMEOUT = 10
 URL_ALL_TRAINS = (
     "https://grapp.spravazeleznic.cz/post/trains/GetTrainsWithFilter/{APP_ID}"
 )
-BODY_ALL_TRAINS = b'{"CarrierCode":["991919","992230","992719","993030","990010","993188","991943","991950","991075","993196","992693","991638","991976","993089","993162","991257","991935","991562","991125","992644","992842","991927","993170","991810","992909","991612","f_o_r_e_i_g_n"],"PublicKindOfTrain":["LE","Ex","Sp","rj","TL","EC","SC","AEx","Os","Rx","TLX","IC","EN","R","RJ","nj","LET"],"FreightKindOfTrain":[],"TrainRunning":false,"TrainNoChange":0,"TrainOutOfOrder":false,"Delay":["0","60","5","61","15","-1","30"],"DelayMin":-99999,"DelayMax":-99999,"SearchByTrainNumber":true,"SearchExtraTrain":false,"SearchByTrainName":true,"SearchByTRID":false,"SearchByVehicleNumber":false,"SearchTextType":"0","SearchPhrase":"","SelectedTrain":-1}'
+BODY_ALL_TRAINS = b'{"CarrierCode":["991919","992230","992719","993030","990010","993188","991943","993246","991950","992693","991638","991976","993089","993162","991257","991935","991562","991125","992644","992842","991927","993170","991810","992909","991612","542005","f_o_r_e_i_g_n"],"PublicKindOfTrain":["LE","Ex","Sp","rj","TL","EC","SC","AEx","Os","Rx","TLX","IC","EN","R","RJ","NJ","LET","ES"],"FreightKindOfTrain":[],"KindOfExtraordinary":[],"TrainRunning":false,"PMD":false,"TrainNoChange":0,"TrainOutOfOrder":false,"Delay":["0","60","5","61","15","-1","30"],"DelayMin":-99999,"DelayMax":-99999,"SearchByTrainNumber":true,"SearchByTrainName":true,"SearchByTRID":false,"SearchByVehicleNumber":false,"SearchTextType":"0","SearchPhrase":"","SelectedTrain":-1,"RequestedBy":-1,"OrderedBy":"","UnRestriction":true,"PlRestriction":true}'
 
 URL_ROUTEINFO = "https://grapp.spravazeleznic.cz/OneTrain/RouteInfo/{APP_ID}?trainId={train_id}&_={ts}"
 
